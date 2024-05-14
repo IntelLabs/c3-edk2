@@ -26,6 +26,9 @@
 #include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
+
 EFI_SMRAM_DESCRIPTOR  *mSmramRanges;
 UINTN                 mSmramRangeCount;
 
@@ -118,6 +121,10 @@ BufferInSmram (
   )
 {
   UINTN  Index;
+
+#ifdef ENABLE_HEAP_ENCRYPTION
+  Buffer = (VOID *)cc_dec_if_encoded_ptr((UINT64)Buffer);
+#endif
 
   for (Index = 0; Index < mSmramRangeCount; Index++) {
     if (((EFI_PHYSICAL_ADDRESS)(UINTN)Buffer >= mSmramRanges[Index].CpuStart) &&

@@ -27,6 +27,8 @@
 #include <Protocol/SmmEndOfDxe.h>
 #include <Guid/MemoryAttributesTable.h>
 
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
 //
 // attributes for reserved memory before it is promoted to system memory
 //
@@ -117,6 +119,10 @@ SmmIsBufferOutsideSmmValid (
   )
 {
   UINTN  Index;
+
+  if (is_encoded_address((void*) Buffer)) {
+    Buffer = cc_isa_decptr(Buffer);
+  }
 
   //
   // Check override.

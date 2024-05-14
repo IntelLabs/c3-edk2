@@ -9,6 +9,28 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include "DxeMain.h"
 #include "Image.h"
 
+#include <Library/C3Defines.h>
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+#if __x86_64__
+#include <Library/C3PointerFunctions.h>
+#include <Library/C3GlobalsUtils.h>
+#define _EXCLUDE_IN_EDK2_BUILD_
+#define CC_INTEGRITY_ENABLE
+
+static inline void
+C3ModuleInfoFinalize(
+  PE_COFF_LOADER_IMAGE_CONTEXT *ImageContext
+  );
+
+static inline void
+C3CoreLoadImageCommonPrep(
+  VOID                        *ImageHandle,
+  LOADED_IMAGE_PRIVATE_DATA   *Image
+  );
+
+#endif
+#endif
+
 //
 // Module Globals
 //
@@ -584,6 +606,12 @@ CoreLoadPeImage (
   BOOLEAN     DstBufAlocated;
   UINTN       Size;
 
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  C3_MODULE_INFO   C3MI;
+
+  CopyMem(&C3MI, &Image->ImageContext.C3ModuleInfo, sizeof(C3_MODULE_INFO));
+#endif
+
   ZeroMem (&Image->ImageContext, sizeof (Image->ImageContext));
 
   Image->ImageContext.Handle    = Pe32Handle;
@@ -744,6 +772,99 @@ CoreLoadPeImage (
     goto Done;
   }
 
+  // C3: moving module name extraction code up
+  UINTN  Index;
+  UINTN  StartIndex;
+  CHAR8  EfiFileName[256];
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+#if __x86_64__ 
+  UINT64 GlobalFirstAddress = 0;
+  UINT64 GlobalLastAddress = 0;
+  UINT64 GlobalSize = 0;
+  UINT64 ConstantOffset = 0;
+  UINT64 ConstantEndOffset = 0;
+  UINT64 ImageBaseEncoded = 0;
+  Image->ImageContext.ImageBaseEncoded = 0;
+#endif
+#endif
+
+  //
+  // Print Module Name by Pdb file path.
+  // Windows and Unix style file path are all trimmed correctly.
+  //
+  if (Image->ImageContext.PdbPointer != NULL) {
+    StartIndex = 0;
+    for (Index = 0; Image->ImageContext.PdbPointer[Index] != 0; Index++) {
+      if ((Image->ImageContext.PdbPointer[Index] == '\\') || (Image->ImageContext.PdbPointer[Index] == '/')) {
+        StartIndex = Index + 1;
+      }
+    }
+
+    //
+    // Copy the PDB file name to our temporary string, and replace .pdb with .efi
+    // The PDB file name is limited in the range of 0~255.
+    // If the length is bigger than 255, trim the redudant characters to avoid overflow in array boundary.
+    //
+    for (Index = 0; Index < sizeof (EfiFileName) - 4; Index++) {
+      EfiFileName[Index] = Image->ImageContext.PdbPointer[Index + StartIndex];
+      if (EfiFileName[Index] == 0) {
+        EfiFileName[Index] = '.';
+      }
+
+      if (EfiFileName[Index] == '.') {
+        EfiFileName[Index + 1] = 'e';
+        EfiFileName[Index + 2] = 'f';
+        EfiFileName[Index + 3] = 'i';
+        EfiFileName[Index + 4] = 0;
+        break;
+      }
+    }
+
+    if (Index == sizeof (EfiFileName) - 4) {
+      EfiFileName[Index] = 0;
+    }
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+#if __x86_64__ 
+    CopyMem(&Image->ImageContext.C3ModuleInfo, &C3MI, sizeof(C3_MODULE_INFO));
+    C3ModuleInfoFinalize(&Image->ImageContext);
+
+    if (Image->ImageContext.C3ModuleInfo.Enabled) {
+      ConstantOffset = Image->ImageContext.C3ModuleInfo.StartOffset;
+      ConstantEndOffset = Image->ImageContext.C3ModuleInfo.EndOffset;
+
+      GlobalFirstAddress = Image->ImageContext.ImageAddress + ConstantOffset;
+      GlobalLastAddress = Image->ImageContext.ImageAddress + ConstantEndOffset;
+
+      // In some cases, variables will be stored outside Size as defined here
+      UINT64 CASize = Size;
+      if (Size < (GlobalLastAddress - Image->ImageContext.ImageAddress)) {
+        CASize = (GlobalLastAddress - Image->ImageContext.ImageAddress);
+        DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Size < CASize (%lx < %lx)\n",
+               Size, CASize));
+      }
+
+      ptr_metadata_t ptr_metadata = {0};
+      if(try_box(Image->ImageContext.ImageAddress, CASize, &ptr_metadata)) {
+        ImageBaseEncoded = cc_isa_encptr(Image->ImageContext.ImageAddress, &ptr_metadata);
+        Image->ImageContext.ImageBaseEncoded = ImageBaseEncoded;
+        GlobalSize = GlobalLastAddress - GlobalFirstAddress;
+      } else {
+        DEBUG((DEBUG_ERROR, "[C3_GLOBALS]: C3 try_box failed\n"));
+      }
+    }
+
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: "
+          "%a %a, s: %016lx, e: %016lx, gs: %016lx, gs: %lx, CA: %016lx\n",
+          (Image->ImageContext.C3ModuleInfo.Enabled ? "Enabled" : "Disabled"),
+          EfiFileName, Image->ImageContext.ImageAddress,
+          Image->ImageContext.ImageAddress + Size, GlobalFirstAddress,
+          GlobalSize, ImageBaseEncoded));
+
+#endif
+#endif
+  }
+
   //
   // If this is a Runtime Driver, then allocate memory for the FixupData that
   // is used to relocate the image when SetVirtualAddressMap() is called. The
@@ -765,7 +886,7 @@ CoreLoadPeImage (
   Status = PeCoffLoaderRelocateImage (&Image->ImageContext);
   if (EFI_ERROR (Status)) {
     goto Done;
-  }
+    }
 
   //
   // Flush the Instruction Cache
@@ -776,6 +897,28 @@ CoreLoadPeImage (
   // Copy the machine type from the context to the image private data.
   //
   Image->Machine = Image->ImageContext.Machine;
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+#ifdef CC_GLOBALS_ENC_ENTRY
+#if __x86_64__
+  if (ImageBaseEncoded != 0) {
+    const UINT64 new_entry =
+        (UINT64)((Image->ImageContext.EntryPoint - Image->ImageContext.ImageAddress) + ImageBaseEncoded);
+    DEBUG((DEBUG_INFO, "Replacing entry 0x%016lx with 0x%016lx\n",
+           Image->ImageContext.EntryPoint, new_entry));
+
+    ASSERT(is_encoded_address(ImageBaseEncoded) ||
+           ImageBaseEncoded == Image->ImageContext.ImageAddress);
+    ASSERT(
+        cc_isa_decptr((UINT64)new_entry) == Image->ImageContext.EntryPoint ||
+        ImageBaseEncoded == Image->ImageContext.ImageAddress);
+    cc_set_icv_lock(0);
+    Image->ImageContext.EntryPoint = new_entry;
+    cc_set_icv_lock(1);
+  }
+#endif
+#endif  // CC_GLOBALS_ENC_ENTRY
+#endif
 
   //
   // Get the image entry point.
@@ -820,8 +963,9 @@ CoreLoadPeImage (
   // Print the load address and the PDB file name if it is available
   //
 
-  DEBUG_CODE_BEGIN ();
+  //DEBUG_CODE_BEGIN ();
 
+/*
   UINTN  Index;
   UINTN  StartIndex;
   CHAR8  EfiFileName[256];
@@ -871,10 +1015,32 @@ CoreLoadPeImage (
 
     DEBUG ((DEBUG_INFO | DEBUG_LOAD, "%a", EfiFileName));   // &Image->ImageContext.PdbPointer[StartIndex]));
   }
+*/
 
-  DEBUG ((DEBUG_INFO | DEBUG_LOAD, "\n"));
+  // C3
+  #ifdef ENABLE_GLOBALS_ENCRYPTION
+  (void) GlobalSize;
+  #ifdef CC_GLOBALS_ENC_DATA
+    #if __x86_64__ 
+    if (ImageBaseEncoded != 0) {
+      //DEBUG((DEBUG_INFO, " *** Encrypting image base pointer 0x%016lx to: "
+      //       "0x%016lx (size: %lu)\n", Image->ImageContext.ImageAddress,
+      //       ImageBaseEncoded, GlobalSize));
+      VOID* TempBuffer = AllocatePool(GlobalSize);
+      CopyMem(TempBuffer, (VOID*) GlobalFirstAddress, GlobalSize);
+      cc_set_icv_lock(0);
+      CopyMem((VOID*) (ImageBaseEncoded + ConstantOffset), TempBuffer,
+              GlobalSize);
+      cc_set_icv_lock(1);
+      FreePool(TempBuffer);
+    }
+    #endif
+  #endif  // CC_GLOBALS_ENC_DATA
+  #endif
 
-  DEBUG_CODE_END ();
+  //DEBUG ((DEBUG_INFO | DEBUG_LOAD, "\n"));
+
+  //DEBUG_CODE_END ();
 
   return EFI_SUCCESS;
 
@@ -952,6 +1118,14 @@ CoreUnloadAndCloseImage (
   EFI_OPEN_PROTOCOL_INFORMATION_ENTRY  *OpenInfo;
   UINTN                                OpenInfoCount;
   UINTN                                OpenInfoIndex;
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  if (Image->ImageContext.ImageBaseEncoded != 0 ) {
+    clear_icv((void *)Image->ImageContext.ImageAddress,
+              Image->ImageContext.ImageSize);
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: CoreUnloadImage cleared ICVs\n"));
+  }
+#endif
 
   HandleBuffer      = NULL;
   ProtocolGuidArray = NULL;
@@ -1372,6 +1546,10 @@ CoreLoadImageCommon (
   if (EFI_ERROR (Status)) {
     goto Done;
   }
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  C3CoreLoadImageCommonPrep(ImageHandle, Image);
+#endif
 
   //
   // Load the image.  If EntryPoint is Null, it will not be set.
@@ -1909,6 +2087,15 @@ CoreUnloadImage (
   LOADED_IMAGE_PRIVATE_DATA  *Image;
 
   Image = CoreLoadedImageInfo (ImageHandle);
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  if (Image->ImageContext.ImageBaseEncoded != 0 ) {
+    clear_icv((void *)Image->ImageContext.ImageAddress,
+              Image->ImageContext.ImageSize);
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: CoreUnloadImage cleared ICVs\n"));
+  }
+#endif
+
   if (Image == NULL ) {
     //
     // The image handle is not valid
@@ -1942,3 +2129,66 @@ CoreUnloadImage (
 Done:
   return Status;
 }
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+
+static inline void
+C3CoreLoadImageCommonPrep(
+  VOID                        *ImageHandle,
+  LOADED_IMAGE_PRIVATE_DATA   *Image
+  )
+{
+  // Try to get the driver entry from the ImageHandle pointer
+  EFI_CORE_DRIVER_ENTRY *DriverEntry = (EFI_CORE_DRIVER_ENTRY *)(
+    ImageHandle - ((VOID *)&((EFI_CORE_DRIVER_ENTRY *)NULL)->ImageHandle));
+  // Check signature of EFI_CORE_DRIVER_ENTRY to make sure
+  if (DriverEntry->Signature == EFI_CORE_DRIVER_ENTRY_SIGNATURE) {
+    // Copy the EFI_GUID into the C3ModuleInfo
+    CopyMem(&Image->ImageContext.C3ModuleInfo.DriverGUID,
+            &DriverEntry->FileName,
+            sizeof(EFI_GUID_COPY));
+  }
+}
+
+static inline void
+C3ModuleInfoFinalize(
+  PE_COFF_LOADER_IMAGE_CONTEXT *ImageContext
+  )
+{
+  ImageContext->C3ModuleInfo.Enabled = 0;
+
+  // Try to get filename for module .efi filenames
+  CHAR8  FileName[256];
+  ReadFileName(FileName, 256, ImageContext);
+
+  // Then check for some special cases where the name doesn't match exactly
+  if (ImageContext->C3ModuleInfo.DriverGUID.Data1 == 0) {
+    // DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Seems we don't have GUID to check\n"));
+  } else {
+    // DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Checking Module GUID: %g\n",
+    //        ImageContext->C3ModuleInfo.DriverGUID));
+    
+    static const EFI_GUID_COPY Guid1 = {0xCB933912,0xDF8F,0x4305,{0xB1,0xF9,0x7B,0x44,0xFA,0x11,0x39,0x5C}};
+    if (C3IsEqualGuid(&Guid1, &ImageContext->C3ModuleInfo.DriverGUID)) {
+      DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Applying AcpiPlatform override\n"));
+      CopyMem(FileName, "AcpiPlatform_cb933912-df8f-4305-b1f9-7b44fa11395c.efi",
+              sizeof("AcpiPlatform_cb933912-df8f-4305-b1f9-7b44fa11395c.efi"));
+    }
+
+    static const EFI_GUID_COPY Guid2 = {0xFC90EB7A,0x3E0A,0x483C,{0xA2,0x6C,0x48,0x4D,0x36,0x59,0x3F,0xF4}};
+    if (C3IsEqualGuid(&Guid2, &ImageContext->C3ModuleInfo.DriverGUID)) {
+      DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Applying AcpiPlatform override\n"));
+      CopyMem(FileName, "AcpiPlatform_FC90EB7A-3E0A-483C-A26C-484D36593FF4.efi",
+              sizeof("AcpiPlatform_FC90EB7A-3E0A-483C-A26C-484D36593FF4.efi"));
+    }
+  }
+
+  INT32 i = FindC3EnabledModule(FileName);
+  if ( i>= 0) {
+    ImageContext->C3ModuleInfo.Enabled = 1;
+    ImageContext->C3ModuleInfo.StartOffset = ConstantOffsets[i];
+    ImageContext->C3ModuleInfo.EndOffset= ConstantEndOffsets[i];
+  }
+}
+
+#endif  // ENABLE_GLOBALS_ENCRYPTION

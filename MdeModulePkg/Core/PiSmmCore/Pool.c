@@ -7,6 +7,17 @@
 **/
 
 #include "PiSmmCore.h"
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
+
+#ifdef C3_SMM_POOL_ALLOCATOR
+STATIC UINT64 c3_smm_pool_alloc_enc_count = 0;
+STATIC UINT64 c3_smm_pool_alloc_fail_count = 0;
+#endif  // C3_SMM_POOL_ALLOCATOR
+#ifdef C3_SMM_PAGE_ALLOCATOR
+UINT64 c3_smm_page_alloc_enc_count = 0;
+UINT64 c3_smm_page_alloc_fail_count = 0;
+#endif  // C3_SMM_PAGE_ALLOCATOR
 
 LIST_ENTRY  mSmmPoolLists[SmmPoolTypeMax][MAX_POOL_INDEX];
 //
@@ -55,6 +66,23 @@ SmmInitializeMemoryServices (
   EFI_STATUS                                  Status;
   UINTN                                       SmmPoolTypeIndex;
   EFI_LOAD_FIXED_ADDRESS_CONFIGURATION_TABLE  *LMFAConfigurationTable;
+
+#ifdef C3_SMM_POOL_ALLOCATOR
+  DEBUG((DEBUG_INFO,
+         "[C3_HEAP]: Dumping SMM c3_smm_pool_alloc_enc_count to %016lx\n",
+         &c3_smm_pool_alloc_enc_count));
+  DEBUG((DEBUG_INFO,
+         "[C3_HEAP]: Dumping SMM c3_smm_pool_alloc_fal_count to %016lx\n",
+         &c3_smm_pool_alloc_fail_count));
+#endif  // C3_SMM_POOL_ALLOCATOR
+#ifdef C3_SMM_PAGE_ALLOCATOR
+  DEBUG((DEBUG_INFO,
+         "[C3_HEAP]: Dumping SMM c3_smm_page_alloc_enc_count to %016lx\n",
+         &c3_smm_page_alloc_enc_count));
+  DEBUG((DEBUG_INFO,
+         "[C3_HEAP]: Dumping SMM c3_smm_page_alloc_fal_count to %016lx\n",
+         &c3_smm_page_alloc_fail_count));
+#endif  // C3_SMM_PAGE_ALLOCATOR
 
   //
   // Initialize Pool list
@@ -355,6 +383,15 @@ SmmAllocatePool (
       );
   }
 
+#ifdef C3_SMM_POOL_ALLOCATOR
+  ASSERT(sizeof(void *) == 8);
+  if(sizeof(void *) == 8 && c3_alloc_shim(Buffer, Size)) {
+    ++c3_smm_pool_alloc_enc_count;
+  } else {
+    ++c3_smm_pool_alloc_fail_count;
+  }
+#endif
+
   return Status;
 }
 
@@ -393,6 +430,11 @@ SmmInternalFreePool (
                   IsMemoryGuarded ((EFI_PHYSICAL_ADDRESS)(UINTN)FreePoolHdr);
   HasPoolTail = !(MemoryGuarded &&
                   ((PcdGet8 (PcdHeapGuardPropertyMask) & BIT7) == 0));
+
+#ifdef C3_SMM_POOL_ALLOCATOR
+  clear_icv(Buffer, FreePoolHdr->Header.Size - sizeof(POOL_HEADER) -
+            (HasPoolTail ? sizeof(POOL_TAIL) : 0));
+#endif  // C3_SMM_POOL_ALLOCATOR
 
   if (HasPoolTail) {
     PoolTail = HEAD_TO_TAIL (&FreePoolHdr->Header);
@@ -447,6 +489,13 @@ SmmFreePool (
   )
 {
   EFI_STATUS  Status;
+
+#ifdef C3_SMM_POOL_ALLOCATOR
+  ASSERT(sizeof(void *) == 8);
+  if (sizeof(void *) == 8) {
+    Buffer = (void*) cc_dec_if_encoded_ptr((UINT64) Buffer);
+  }
+#endif
 
   Status = SmmInternalFreePool (Buffer);
   if (!EFI_ERROR (Status)) {

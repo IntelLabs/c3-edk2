@@ -6,6 +6,8 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 
 **/
 
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
 #include "DxeMain.h"
 
 //
@@ -281,9 +283,24 @@ DxeMain (
   // Use the templates to initialize the contents of the EFI System Table and EFI Runtime Services Table
   //
   gDxeCoreST = AllocateRuntimeCopyPool (sizeof (EFI_SYSTEM_TABLE), &mEfiSystemTableTemplate);
+#ifdef ENABLE_HEAP_ENCRYPTION
+  if (is_encoded_address(gDxeCoreST)) {
+    DEBUG((DEBUG_INFO, "[C3_HEAP]: Disabling for EFI System Table at %16lx\n",
+          gDxeCoreST));
+    gDxeCoreST = revert_ca_alloc(gDxeCoreST, sizeof(EFI_SYSTEM_TABLE));
+  }
+#endif
   ASSERT (gDxeCoreST != NULL);
 
   gDxeCoreRT = AllocateRuntimeCopyPool (sizeof (EFI_RUNTIME_SERVICES), &mEfiRuntimeServicesTableTemplate);
+#ifdef ENABLE_HEAP_ENCRYPTION
+  if (is_encoded_address(gDxeCoreRT)) {
+    DEBUG((DEBUG_INFO,
+          "[C3_HEAP]: Disabling for EFI Runtime Service Table at %16lx\n",
+          gDxeCoreRT));
+    gDxeCoreRT = revert_ca_alloc (gDxeCoreRT, sizeof(EFI_RUNTIME_SERVICES));
+  }
+#endif
   ASSERT (gDxeCoreRT != NULL);
 
   gDxeCoreST->RuntimeServices = gDxeCoreRT;

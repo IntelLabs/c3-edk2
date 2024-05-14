@@ -17,6 +17,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include <Library/UefiLib.h>
 #include <Library/DevicePathLib.h>
 #include <Library/PeCoffGetEntryPointLib.h>
+#include <Library/C3PointerFunctions.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/SmmAccess2.h>
 #include <Protocol/SmmReadyToLock.h>
@@ -260,6 +261,10 @@ GetSmmLoadedImage (
   CHAR8                      *PdbString;
   PHYSICAL_ADDRESS           RealImageBase;
 
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  UINTN OriginalEP;
+#endif
+
   HandleBufferSize = 0;
   HandleBuffer     = NULL;
   Status           = gSmst->SmmLocateHandle (
@@ -315,6 +320,12 @@ GetSmmLoadedImage (
     RealImageBase      = (UINTN)LoadedImage->ImageBase;
     if (LoadedImagePrivate->Signature == EFI_SMM_DRIVER_ENTRY_SIGNATURE) {
       EntryPoint = LoadedImagePrivate->ImageEntryPoint;
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+      OriginalEP = EntryPoint;
+      if (is_encoded_address(EntryPoint)) {
+        EntryPoint = cc_isa_decptr((UINTN)EntryPoint);
+      }
+#endif
       if ((EntryPoint != 0) && ((EntryPoint < (UINTN)LoadedImage->ImageBase) || (EntryPoint >= ((UINTN)LoadedImage->ImageBase + LoadedImage->ImageSize)))) {
         //
         // If the EntryPoint is not in the range of image buffer, it should come from emulation environment.
@@ -323,6 +334,9 @@ GetSmmLoadedImage (
         Status = InternalPeCoffGetEntryPoint (LoadedImage->ImageBase, &EntryPointInImage);
         ASSERT_EFI_ERROR (Status);
         RealImageBase = (UINTN)LoadedImage->ImageBase + EntryPoint - (UINTN)EntryPointInImage;
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+        EntryPoint = OriginalEP;
+#endif
       }
     }
 

@@ -185,6 +185,11 @@ HasErrorCode:
     push rsi
     push rdi
 
+    ; C3 save context (may waste space, but 512 should fit everything)
+    sub     rsp, 512
+    mov     rax, rsp
+    db 0xf0,0x2f
+
 ;; UINT64  Gs, Fs, Es, Ds, Cs, Ss;  insure high 16 bits of each is zero
     movzx   rax, word [rbp + 56]
     push    rax                      ; for ss
@@ -399,6 +404,11 @@ CetDone:
     pop     qword [rbp + 32]  ; for cs
     pop     qword [rbp + 56]  ; for ss
 
+    ; C3 restore context
+    mov     rax, rsp
+    db 0xf0,0xfa
+    add     rsp, 512
+
 ;; UINT64  Rdi, Rsi, Rbp, Rsp, Rbx, Rdx, Rcx, Rax;
 ;; UINT64  R8, R9, R10, R11, R12, R13, R14, R15;
     pop     rdi
@@ -452,6 +462,7 @@ DoIret:
 global ASM_PFX(AsmGetTemplateAddressMap)
 ASM_PFX(AsmGetTemplateAddressMap):
     lea     rax, [AsmIdtVectorBegin]
+    db      0xf0, 0x48, 0x01, 0xc0      ; C3 decptr %rax
     mov     qword [rcx], rax
     mov     qword [rcx + 0x8],  (AsmIdtVectorEnd - AsmIdtVectorBegin) / 256
     lea     rax, [HookAfterStubHeaderBegin]
@@ -460,6 +471,7 @@ ASM_PFX(AsmGetTemplateAddressMap):
 ; Fix up CommonInterruptEntry address
     lea    rax, [ASM_PFX(CommonInterruptEntry)]
     lea    rcx, [AsmIdtVectorBegin]
+    db     0xf0, 0x48, 0x01, 0xc9       ; C3 decptr %rcx
 %rep  256
     mov    qword [rcx + (JmpAbsoluteAddress - 8 - HookAfterStubHeaderBegin)], rax
     add    rcx, (AsmIdtVectorEnd - AsmIdtVectorBegin) / 256
@@ -467,6 +479,7 @@ ASM_PFX(AsmGetTemplateAddressMap):
 ; Fix up HookAfterStubHeaderEnd
     lea    rax, [HookAfterStubHeaderEnd]
     lea    rcx, [JmpAbsoluteAddress]
+    db     0xf0, 0x48, 0x01, 0xc9       ; C3 decptr %rcx
     mov    qword [rcx - 8], rax
 
     ret

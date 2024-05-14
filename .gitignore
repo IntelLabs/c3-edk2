@@ -1,7 +1,11 @@
 Build/
+Conf/
 .DS_Store
 *_extdep/
 *.pyc
 __pycache__/
 tags/
 .vscode/
+MdeModulePkg/Timer_Hijack/Timer_Hijack.defines.h
+MdeModulePkg/Core/Dxe/Image/ConstantSectionOffset.h
+MdePkg/Include/Library/C3ConstantSections.h

@@ -7,6 +7,7 @@
 **/
 
 #include "PiSmmCore.h"
+#include <Library/C3PointerFunctions.h>
 
 #define IS_SMRAM_PROFILE_ENABLED        ((PcdGet8 (PcdMemoryProfilePropertyMask) & BIT1) != 0)
 #define IS_UEFI_MEMORY_PROFILE_ENABLED  ((PcdGet8 (PcdMemoryProfilePropertyMask) & BIT0) != 0)
@@ -1112,6 +1113,10 @@ SmmCoreUpdateProfileAllocate (
   UINTN                            ActionStringSize;
   UINTN                            ActionStringOccupiedSize;
 
+#ifdef C3_SMM_POOL_ALLOCATOR
+  ASSERT(!is_encoded_address(Buffer));
+#endif
+
   BasicAction = Action & MEMORY_PROFILE_ACTION_BASIC_MASK;
 
   ContextData = GetSmramProfileContext ();
@@ -1309,6 +1314,10 @@ SmmCoreUpdateProfileFree (
   MEMORY_PROFILE_ACTION            BasicAction;
   BOOLEAN                          Found;
 
+#ifdef C3_SMM_POOL_ALLOCATOR
+  ASSERT(!is_encoded_address(Buffer));
+#endif
+
   BasicAction = Action & MEMORY_PROFILE_ACTION_BASIC_MASK;
 
   ContextData = GetSmramProfileContext ();
@@ -1485,6 +1494,10 @@ SmmCoreUpdateProfile (
   EFI_STATUS                   Status;
   MEMORY_PROFILE_CONTEXT_DATA  *ContextData;
   MEMORY_PROFILE_ACTION        BasicAction;
+
+#ifdef C3_SMM_POOL_ALLOCATOR
+  Buffer = (VOID *)cc_dec_if_encoded_ptr((UINT64)Buffer);
+#endif
 
   if (!IS_SMRAM_PROFILE_ENABLED) {
     return EFI_UNSUPPORTED;

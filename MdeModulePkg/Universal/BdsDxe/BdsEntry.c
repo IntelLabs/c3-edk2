@@ -16,6 +16,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include "Language.h"
 #include "HwErrRecSupport.h"
 #include <Library/VariablePolicyHelperLib.h>
+#include <Library/C3PointerFunctions.h>
 
 #define SET_BOOT_OPTION_SUPPORT_KEY_COUNT(a, c)  { \
       (a) = ((a) & ~EFI_BOOT_OPTION_SUPPORT_COUNT) | (((c) << LowBitSet32 (EFI_BOOT_OPTION_SUPPORT_COUNT)) & EFI_BOOT_OPTION_SUPPORT_COUNT); \
@@ -708,6 +709,9 @@ BdsEntry (
   //
   FirmwareVendor      = (CHAR16 *)PcdGetPtr (PcdFirmwareVendor);
   gST->FirmwareVendor = AllocateRuntimeCopyPool (StrSize (FirmwareVendor), FirmwareVendor);
+  DEBUG((DEBUG_INFO, "[C3_HEAP]: Disabling for gST->FirmwareVendor at %16lx\n",
+         gST->FirmwareVendor));
+  gST->FirmwareVendor = revert_ca_alloc(gST->FirmwareVendor, StrSize(FirmwareVendor));
   ASSERT (gST->FirmwareVendor != NULL);
   gST->FirmwareRevision = PcdGet32 (PcdFirmwareRevision);
 

@@ -17,6 +17,8 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include <Protocol/MmReadyToLock.h>
 #include <Protocol/MmEndOfDxe.h>
 #include <Protocol/SmmSxDispatch2.h>
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
 
 #include "SmmLockBoxLibPrivate.h"
 
@@ -461,6 +463,7 @@ SaveLockBox (
     return EFI_OUT_OF_RESOURCES;
   }
 
+
   //
   // Allocate LockBox
   //
@@ -475,6 +478,13 @@ SaveLockBox (
     DEBUG ((DEBUG_INFO, "SmmLockBoxSmmLib SaveLockBox - Exit (%r)\n", EFI_OUT_OF_RESOURCES));
     return EFI_OUT_OF_RESOURCES;
   }
+
+
+#ifdef C3_HEAP_OPTIN_LOCKBOX
+  if (!is_encoded_address(SmramBuffer)) {
+    c3_alloc_shim((VOID**)&SmramBuffer, Length);
+  }
+#endif
 
   //
   // Save data

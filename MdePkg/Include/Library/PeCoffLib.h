@@ -14,6 +14,9 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #define __BASE_PE_COFF_LIB_H__
 
 #include <IndustryStandard/PeImage.h>
+#include <Library/C3Defines.h>
+#include <Library/C3GlobalsUtils.h>
+#include <Library/C3PointerFunctions.h>
 //
 // Return status codes from the PE/COFF Loader services
 //
@@ -191,6 +194,13 @@ typedef struct {
   /// Private storage for implementation specific data.
   ///
   UINT64                      Context;
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  ///
+  /// C3: Holds the address at which the global section ends
+  ///
+  UINT64                      ImageBaseEncoded;
+  C3_MODULE_INFO              C3ModuleInfo;
+#endif
 } PE_COFF_LOADER_IMAGE_CONTEXT;
 
 /**
@@ -381,5 +391,53 @@ EFIAPI
 PeCoffLoaderUnloadImage (
   IN OUT PE_COFF_LOADER_IMAGE_CONTEXT  *ImageContext
   );
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+
+static inline UINT32 IsC3Encoded(PE_COFF_LOADER_IMAGE_CONTEXT *ImageContext) {
+  return (ImageContext->ImageBaseEncoded != 0 &&
+          ImageContext->ImageBaseEncoded != ImageContext->ImageAddress);
+}
+
+static inline UINT32 ReadFileName(CHAR8 *Fn, UINT32 FnSize, 
+                                  PE_COFF_LOADER_IMAGE_CONTEXT *ImageContext) {
+  UINT32 Index;
+  UINT32 StartIndex = 0;
+
+  if (ImageContext->PdbPointer == NULL) {
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: ImageContext->PdbPointer == NULL\n"));
+    return 0;
+  }
+
+  for (Index = 0; ImageContext->PdbPointer[Index] != 0; Index++) {
+    if ((ImageContext->PdbPointer[Index] == '\\') ||
+        (ImageContext->PdbPointer[Index] == '/')) {
+      StartIndex = Index + 1;
+    }
+  }
+
+  for (Index = 0; Index < FnSize - 4; Index++) {
+    Fn[Index] = ImageContext->PdbPointer[Index + StartIndex];
+    if (Fn[Index] == 0) {
+      Fn[Index] = '.';
+    }
+
+    if (Fn[Index] == '.') {
+      Fn[Index + 1] = 'e';
+      Fn[Index + 2] = 'f';
+      Fn[Index + 3] = 'i';
+      Fn[Index + 4] = 0;
+      return 1;
+    }
+  }
+
+  if (Index == FnSize - 4) {
+    Fn[Index] = 0;
+  }
+
+  return 0;
+}
+
+#endif  // ENABLE_GLOBALS_ENCRYPTION
 
 #endif

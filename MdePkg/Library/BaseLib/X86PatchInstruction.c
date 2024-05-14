@@ -8,6 +8,8 @@
 **/
 
 #include "BaseLibInternals.h"
+#include "Library/C3Defines.h"
+#include "Library/C3PointerFunctions.h"
 
 /**
   Patch the immediate operand of an IA32 or X64 instruction such that the byte,
@@ -56,6 +58,10 @@ PatchInstructionX86 (
   // instruction at address 0; forbid it.
   //
   ASSERT ((UINTN)InstructionEnd > ValueSize);
+
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+  InstructionEnd = c3_dec_if_encoded_address(InstructionEnd);
+#endif  // ENABLE_GLOBALS_ENCRYPTION
 
   switch (ValueSize) {
     case 1:

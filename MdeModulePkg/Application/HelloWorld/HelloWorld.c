@@ -11,7 +11,20 @@
 #include <Library/PcdLib.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiApplicationEntryPoint.h>
+#include <Library/MemoryAllocationLib.h>
+#include <Library/UefiBootServicesTableLib.h>
 
+#ifndef  MAGIC
+  #define MAGIC(n) do {                             \
+    int simics_magic_instr_dummy;                   \
+    __asm__ __volatile__ ("cpuid"                   \
+      : "=a" (simics_magic_instr_dummy)             \
+      : "a" (0x4711 | ((unsigned)(n) << 16))        \
+      : "ecx", "edx", "ebx");                       \
+  } while (0)
+  #define MAGIC_ENTER MAGIC(0); MAGIC(1);
+  #define MAGIC_EXIT MAGIC(2); MAGIC(0);
+#endif
 //
 // String token ID of help message text.
 // Shell supports to find help message in the resource section of an application image if
@@ -21,6 +34,7 @@
 // Shell.
 //
 GLOBAL_REMOVE_IF_UNREFERENCED EFI_STRING_ID  mStringHelpTokenId = STRING_TOKEN (STR_HELLO_WORLD_HELP_INFORMATION);
+GLOBAL_REMOVE_IF_UNREFERENCED UINT8 *Data = NULL;
 
 /**
   The user Entry Point for Application. The user code starts with this function
@@ -40,21 +54,12 @@ UefiMain (
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
-  UINT32  Index;
-
-  Index = 0;
-
-  //
-  // Three PCD type (FeatureFlag, UINT32 and String) are used as the sample.
-  //
-  if (FeaturePcdGet (PcdHelloWorldPrintEnable)) {
-    for (Index = 0; Index < PcdGet32 (PcdHelloWorldPrintTimes); Index++) {
-      //
-      // Use UefiLib Print API to print string to UEFI console
-      //
-      Print ((CHAR16 *)PcdGetPtr (PcdHelloWorldPrintString));
-    }
-  }
-
+  Print (L"Hello UEFI World\n");
+  UINTN DataSize = 16;
+  gBS->AllocatePool(EfiBootServicesData, DataSize, (VOID *) &Data);
+  MAGIC(0);
+  Print (L"Allocated pointer: 0x%p\n", Data);
+  Print (L"Pointer to pointer: 0x%p\n", &Data);
+  gBS->FreePool(Data);
   return EFI_SUCCESS;
 }

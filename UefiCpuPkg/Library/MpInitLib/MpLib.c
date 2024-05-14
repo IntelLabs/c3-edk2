@@ -12,6 +12,7 @@
 #include <Library/VmgExitLib.h>
 #include <Register/Amd/Fam17Msr.h>
 #include <Register/Amd/Ghcb.h>
+#include <Library/C3PointerFunctions.h>
 
 EFI_GUID  mCpuInitMpLibHobGuid = CPU_INIT_MP_LIB_HOB_GUID;
 
@@ -1959,8 +1960,9 @@ MpInitLibInitialize (
   CpuMpData->WakeupBufferHigh = AllocateCodeBuffer (ApResetVectorSizeAbove1Mb);
   CopyMem (
     (VOID *)CpuMpData->WakeupBufferHigh,
-    CpuMpData->AddressMap.RendezvousFunnelAddress +
-    CpuMpData->AddressMap.ModeTransitionOffset,
+    (VOID *)((UINTN)cc_dec_if_encoded_ptr((UINTN)(
+      CpuMpData->AddressMap.RendezvousFunnelAddress +
+      CpuMpData->AddressMap.ModeTransitionOffset))),
     ApResetVectorSizeAbove1Mb
     );
   DEBUG ((DEBUG_INFO, "AP Vector: non-16-bit = %p/%x\n", CpuMpData->WakeupBufferHigh, ApResetVectorSizeAbove1Mb));

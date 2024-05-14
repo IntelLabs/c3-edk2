@@ -1,3 +1,27 @@
+=======
+Notice:
+=======
+
+The contents of this repository and linked repositories are solely for research
+purposes and may contain software with vulnerabilities, such as outdated
+libraries. Do not use in production.
+
+This library is solely intended for use in the context of the system contained
+in https://github.com/IntelLabs/c3-simulator.
+
+This material is based upon work supported by the Naval Information Warfare
+Center Pacific and the Defense Advanced Research Project Agency under Prototype
+Other Transaction Agreement No. N66001-23-9-4004. Any opinions, findings and
+conclusions or recommendations expressed in this material are those of the
+author(s) and do not necessarily reflect the views of the Naval Information
+Warfare Center Pacific or the Defense Advanced Research Project Agency.
+
+Note that build statuses below are from upstream at time of fork.
+
+====================
+Original ReadMe.rst:
+====================
+
 ==============
 EDK II Project
 ==============

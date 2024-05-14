@@ -917,6 +917,8 @@ RefreshGcdMemoryAttributes (
   mIsFlushingGCD = FALSE;
 }
 
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
 /**
   Initialize Interrupt Descriptor Table for interrupt handling.
 
@@ -947,6 +949,17 @@ InitInterruptDescriptorTable (
     //
     IdtTable = AllocateZeroPool (sizeof (IA32_IDT_GATE_DESCRIPTOR) * CPU_INTERRUPT_NUM);
     ASSERT (IdtTable != NULL);
+    // Manually enforcing that IdtTable is not encoded: decoding it and zeroing out
+    // NOTE: This debug printout seems to get lost!
+#ifdef ENABLE_HEAP_ENCRYPTION
+    if (is_encoded_address(IdtTable)) {
+      DEBUG((DEBUG_INFO,
+            "[C3_HEAP]: Disabling for Interrupt Descriptor Table at %16lx\n",
+            IdtTable));
+      IdtTable = revert_ca_alloc(
+              IdtTable, (sizeof(IA32_IDT_GATE_DESCRIPTOR) * CPU_INTERRUPT_NUM));
+    }
+#endif
     CopyMem (IdtTable, (VOID *)IdtDescriptor.Base, sizeof (IA32_IDT_GATE_DESCRIPTOR) * IdtEntryCount);
 
     //

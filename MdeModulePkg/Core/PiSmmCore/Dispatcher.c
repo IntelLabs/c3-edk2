@@ -35,6 +35,15 @@
 
 #include "PiSmmCore.h"
 
+#include <Library/C3Defines.h>
+#ifdef C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+#include <Library/C3GlobalsUtils.h>
+#if __x86_64__
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
+#endif  //__x86_64__
+#endif  // C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+
 //
 // SMM Dispatcher Data structures
 //
@@ -326,6 +335,13 @@ SmmLoadImage (
   EFI_FIRMWARE_VOLUME2_PROTOCOL  *Fv;
   PE_COFF_LOADER_IMAGE_CONTEXT   ImageContext;
 
+#ifdef C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+  CHAR8  EfiFileName[256];
+  UINT64 GlobalFirstAddr = 0;
+  UINT64 GlobalSize = 0;
+  UINT64 ConstantOffset = 0;
+#endif  // __C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+
   PERF_LOAD_IMAGE_BEGIN (DriverEntry->ImageHandle);
 
   Buffer   = NULL;
@@ -542,6 +558,42 @@ SmmLoadImage (
     return Status;
   }
 
+#ifdef C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+  ImageContext.ImageBaseEncoded = ImageContext.ImageAddress;
+  if (ReadFileName(&EfiFileName[0], 256, &ImageContext) == 0) {
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Cannot get filename for SMM image\n"));
+  } else {
+#if !(__x86_64__)
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: SMM-non-64bit-code, %a", EfiFileName));
+#else  // __x86_64__
+    INT32 i = FindC3EnabledModule(EfiFileName);
+    if (i >= 0) {
+      ConstantOffset = ConstantOffsets[i];
+      GlobalFirstAddr = ConstantOffset + ImageContext.ImageAddress;
+      GlobalSize = ConstantEndOffsets[i] - ConstantOffset;
+      MAGIC_MODULE_LOAD();
+      ImageContext.ImageBaseEncoded = C3TryBoxAndEncode(
+          ImageContext.ImageAddress, Size);
+      ASSERT(ImageContext.ImageBaseEncoded != 0);
+    }
+
+    DEBUG((DEBUG_INFO, "[C3_GLOBALS]: %a SMM-%a, s: %016lx, e: %016lx, "
+                       "gs: %016lx, gs: %ld, CA: %016lx\n",
+           (IsC3Encoded(&ImageContext) ? "SMM-Enable" : "SMM-Disable"),
+           EfiFileName, ImageContext.ImageAddress,
+           ImageContext.ImageAddress + Size,
+           ImageContext.ImageAddress + ConstantOffset,
+           GlobalSize, ImageContext.ImageBaseEncoded));
+        
+#endif  // __x86_64__
+  }
+
+  (void) ConstantOffset;
+  (void) GlobalSize;
+  (void) GlobalFirstAddr;
+
+#endif  // C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+
   //
   // Relocate the image in our new buffer
   //
@@ -559,6 +611,24 @@ SmmLoadImage (
   // Flush the instruction cache so the image data are written before we execute it
   //
   InvalidateInstructionCacheRange ((VOID *)(UINTN)ImageContext.ImageAddress, (UINTN)ImageContext.ImageSize);
+
+#ifdef C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+  if (IsC3Encoded(&ImageContext)) {
+    const UINT64 new_entry = (UINT64)((ImageContext.EntryPoint -
+                                       ImageContext.ImageAddress) +
+                                       ImageContext.ImageBaseEncoded);
+
+    // DEBUG((DEBUG_INFO, "[C3_GLOBALS]: Replacing entry 0x%016lx with 0x%016lx\n",
+    //        ImageContext.EntryPoint, new_entry));
+    ASSERT(
+        cc_isa_decptr((UINT64)new_entry) == ImageContext.EntryPoint ||
+        ImageContext.ImageBaseEncoded == ImageContext.ImageAddress);
+
+    cc_set_icv_lock(0);
+    ImageContext.EntryPoint = new_entry;
+    cc_set_icv_lock(1);
+  }
+#endif  // C3_ENABLE_SMM_GLOBALS_ENCRYPTION
 
   //
   // Save Image EntryPoint in DriverEntry
@@ -730,6 +800,18 @@ SmmLoadImage (
   if (!EFI_ERROR (Status) && EFI_ERROR (SecurityStatus)) {
     Status = SecurityStatus;
   }
+
+#ifdef C3_ENABLE_SMM_GLOBALS_ENCRYPTION
+  if (IsC3Encoded(&ImageContext)) {
+    VOID* TempBuffer = AllocatePool(GlobalSize);
+    CopyMem(TempBuffer, (VOID*) GlobalFirstAddr, GlobalSize);
+    cc_set_icv_lock(0);
+    CopyMem((VOID*)(ImageContext.ImageBaseEncoded + ConstantOffset), TempBuffer,
+            GlobalSize);
+    cc_set_icv_lock(1);
+    FreePool(TempBuffer);
+  }
+#endif  // C3_ENABLE_SMM_GLOBALS_ENCRYPTION
 
   return Status;
 }

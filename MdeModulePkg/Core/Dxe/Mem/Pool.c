@@ -10,7 +10,13 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include "Imem.h"
 #include "HeapGuard.h"
 
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
+
 STATIC EFI_LOCK  mPoolMemoryLock = EFI_INITIALIZE_LOCK_VARIABLE (TPL_NOTIFY);
+
+STATIC UINT64 c3_alloc_enc_count = 0;
+STATIC UINT64 c3_alloc_fail_count = 0;
 
 #define POOL_FREE_SIGNATURE  SIGNATURE_32('p','f','r','0')
 typedef struct {
@@ -127,6 +133,12 @@ CoreInitializePool (
       InitializeListHead (&mPoolHead[Type].FreeList[Index]);
     }
   }
+  DEBUG((DEBUG_INFO,
+         "[C3_HEAP]: Dumping c3_alloc_enc_count to %016lx\n",
+         &c3_alloc_enc_count));
+  DEBUG((DEBUG_INFO,
+         "[C3_HEAP]: Dumping c3_alloc_fal_count to %016lx\n",
+         &c3_alloc_fail_count));
 }
 
 /**
@@ -520,11 +532,22 @@ Done:
       Size -= SIZE_OF_POOL_HEAD;
     }
 
+    static INT64 alloc_count = 0;
+    alloc_count++;
+
+#ifdef ENABLE_HEAP_ENCRYPTION
+    if (c3_alloc_shim(&Buffer, Size)) {
+        c3_alloc_enc_count++;
+    } else {
+        c3_alloc_fail_count++;
+    }
+#endif
+
     DEBUG_CLEAR_MEMORY (Buffer, Size);
 
     DEBUG ((
       DEBUG_POOL,
-      "AllocatePoolI: Type %x, Addr %p (len %lx) %,ld\n",
+      "AllocatePoolI (%ld): Type %x, Addr %p (len %lx) %,ld\n", alloc_count,
       PoolType,
       Buffer,
       (UINT64)Size,
@@ -561,6 +584,7 @@ CoreInternalFreePool (
   }
 
   CoreAcquireLock (&mPoolMemoryLock);
+  //DEBUG((DEBUG_INFO, "Free: 0x%016lx\n", (UINT64)Buffer));
   Status = CoreFreePoolI (Buffer, PoolType);
   CoreReleaseLock (&mPoolMemoryLock);
   return Status;
@@ -696,13 +720,30 @@ CoreFreePoolI (
   BOOLEAN    IsGuarded;
   BOOLEAN    HasPoolTail;
   BOOLEAN    PageAsPool;
+#ifdef ENABLE_HEAP_ENCRYPTION
+  BOOLEAN    is_ca;
+#endif
 
   ASSERT (Buffer != NULL);
+
+#ifdef ENABLE_HEAP_ENCRYPTION
+  is_ca = is_encoded_address(Buffer);
+  if (is_ca) {
+    Buffer = (void*) cc_isa_decptr((UINT64) Buffer);
+  }
+#endif
+
   //
   // Get the head & tail of the pool entry
   //
   Head = BASE_CR (Buffer, POOL_HEAD, Data);
   ASSERT (Head != NULL);
+
+#ifdef ENABLE_HEAP_ENCRYPTION
+  if (is_ca) {
+    clear_icv(Head , Head->Size);
+  }
+#endif  // ENABLE_HEAP_ENCRYPTION
 
   if ((Head->Signature != POOL_HEAD_SIGNATURE) &&
       (Head->Signature != POOLPAGE_HEAD_SIGNATURE))

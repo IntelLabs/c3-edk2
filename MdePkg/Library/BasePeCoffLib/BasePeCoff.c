@@ -24,6 +24,14 @@
 
 #include "BasePeCoffLibInternals.h"
 
+#include <Library/C3Defines.h>
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+#include "../../../MdeModulePkg/Core/Dxe/Image/ConstantSectionOffset.h"
+#if __x86_64__
+#include <Library/C3PointerFunctions.h>
+#endif  //__x86_64__
+#endif  // C3_ENABLE_GLOBALS_ENCRYPTION
+
 /**
   Adjust some fields in section header for TE image.
 
@@ -593,6 +601,12 @@ PeCoffLoaderGetImageInfo (
     return RETURN_INVALID_PARAMETER;
   }
 
+#ifdef ENABLE_GLOBALS_ENCRYPTION
+#if __x86_64__
+  ImageContext->ImageBaseEncoded = 0x0;
+#endif
+#endif
+
   //
   // Assume success
   //
@@ -1117,6 +1131,13 @@ PeCoffLoaderRelocateImage (
           case EFI_IMAGE_REL_BASED_DIR64:
             Fixup64  = (UINT64 *)Fixup;
             *Fixup64 = *Fixup64 + (UINT64)Adjust;
+            #ifdef ENABLE_GLOBALS_ENCRYPTION
+              #if __x86_64__ 
+                if (is_encoded_address((VOID*) ImageContext->ImageBaseEncoded)){
+                  *Fixup64 = *Fixup64 - ImageContext->ImageAddress + ImageContext->ImageBaseEncoded;
+                }
+              #endif
+            #endif
             if (FixupData != NULL) {
               FixupData              = ALIGN_POINTER (FixupData, sizeof (UINT64));
               *(UINT64 *)(FixupData) = *Fixup64;

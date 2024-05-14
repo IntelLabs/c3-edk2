@@ -859,6 +859,13 @@ SmmMain (
   // Get SMM Core Private context passed in from SMM IPL in ImageHandle.
   //
   gSmmCorePrivate = (SMM_CORE_PRIVATE_DATA *)ImageHandle;
+#ifdef C3_EXPLOIT_HELPER
+  DEBUG((DEBUG_INFO, "gSmmCorePrivate is_encoded_address -> %d\n",
+         is_encoded_address(gSmmCorePrivate)));
+  DEBUG_MAGIC_SEND(5, cc_dec_if_encoded_ptr((UINT64)gSmmCorePrivate));
+  DEBUG_MAGIC_SEND(
+      6, cc_dec_if_encoded_ptr((UINT64)&gSmmCorePrivate->CommunicationBuffer));
+#endif  // C3_EXPLOIT_HELPER
 
   //
   // Fill in SMRAM physical address for the SMM Services Table and the SMM Entry Point.

@@ -7,6 +7,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
 #include "DxeMain.h"
+#include <Library/C3PointerFunctions.h>
 
 #define CONFIG_TABLE_SIZE_INCREASED  0x10
 
@@ -109,6 +110,15 @@ CoreInstallConfigurationTable (
       //
       mSystemTableAllocateSize += (CONFIG_TABLE_SIZE_INCREASED * sizeof (EFI_CONFIGURATION_TABLE));
       EfiConfigurationTable     = AllocateRuntimePool (mSystemTableAllocateSize);
+#ifdef ENABLE_HEAP_ENCRYPTION
+      if (is_encoded_address(EfiConfigurationTable)) {
+        DEBUG((DEBUG_INFO,
+              "[C3_HEAP]: Disabling for EFI Configuration Table entry at "
+              "%16lx\n",
+              EfiConfigurationTable));
+        EfiConfigurationTable = revert_ca_alloc(EfiConfigurationTable, mSystemTableAllocateSize);
+      }
+#endif
       if (EfiConfigurationTable == NULL) {
         //
         // If a new table could not be allocated, then return an error.

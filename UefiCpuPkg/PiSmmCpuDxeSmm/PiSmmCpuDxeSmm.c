@@ -9,6 +9,8 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
 
 #include "PiSmmCpuDxeSmm.h"
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
 
 //
 // SMM CPU Private Data structure that contains SMM Configuration Protocol

@@ -225,6 +225,7 @@ SmiHandlerRegister (
   }
 
   SmiHandler = AllocateZeroPool (sizeof (SMI_HANDLER));
+
   if (SmiHandler == NULL) {
     return EFI_OUT_OF_RESOURCES;
   }

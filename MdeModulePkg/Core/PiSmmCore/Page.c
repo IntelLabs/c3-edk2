@@ -8,6 +8,13 @@
 
 #include "PiSmmCore.h"
 #include <Library/SmmServicesTableLib.h>
+#include <Library/C3Defines.h>
+#include <Library/C3PointerFunctions.h>
+
+#ifdef C3_SMM_PAGE_ALLOCATOR
+extern UINT64 c3_smm_page_alloc_enc_count;
+extern UINT64 c3_smm_page_alloc_fail_count;
+#endif  // C3_SMM_PAGE_ALLOCATOR
 
 #define TRUNCATE_TO_PAGES(a)  ((a) >> EFI_PAGE_SHIFT)
 
@@ -749,6 +756,16 @@ SmmAllocatePages (
       );
   }
 
+#ifdef C3_SMM_PAGE_ALLOCATOR
+  ASSERT(sizeof(void *) == 8);
+  if(sizeof(void *) == 8 && c3_alloc_shim((void**)Memory,
+                                          EFI_PAGES_TO_SIZE(NumberOfPages))) {
+    ++c3_smm_page_alloc_enc_count;
+  } else {
+    ++c3_smm_page_alloc_fail_count;
+  }
+#endif
+
   return Status;
 }
 
@@ -938,6 +955,14 @@ SmmFreePages (
 {
   EFI_STATUS  Status;
   BOOLEAN     IsGuarded;
+
+#ifdef C3_SMM_PAGE_ALLOCATOR
+  ASSERT(sizeof(void *) == 8);
+  if (sizeof(void *) == 8) {
+    Memory = (EFI_PHYSICAL_ADDRESS)cc_dec_if_encoded_ptr(Memory);
+  }
+  clear_icv((void *)Memory, EFI_PAGES_TO_SIZE(NumberOfPages));
+#endif  // C3_SMM_PAGE_ALLOCATOR
 
   if (!InMemMap (Memory, NumberOfPages)) {
     return EFI_NOT_FOUND;
